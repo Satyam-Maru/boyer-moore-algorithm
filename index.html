@@ -1,214 +1,33 @@
-<!-- <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Robust Boyer-Moore Visualizer</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
-    <style>
-        :root { --cell-size: 50px; --cell-gap: 4px; }
-        .char-cell { 
-            width: var(--cell-size); height: var(--cell-size); 
-            display: flex; align-items: center; justify-content: center; 
-            border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
-            position: relative; transition: background-color 0.2s, border-color 0.2s, transform 0.2s;
-        }
-        .text-box { background: #1e293b; border: 2px solid #334155; color: #f8fafc; }
-        .pattern-box { background: #3b82f6; border: 2px solid #2563eb; color: white; }
-        
-        /* State Classes */
-        .comparing { border-color: #facc15 !important; transform: translateY(-4px); z-index: 20; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-        .match { background-color: #22c55e !important; border-color: #16a34a !important; color: white; }
-        .mismatch { background-color: #ef4444 !important; border-color: #b91c1c !important; color: white; }
-        .found-permanent { background-color: #10b981; border-color: #059669; color: white; box-shadow: 0 0 15px rgba(16,185,129,0.4); }
-    </style>
-</head>
-<body class="bg-slate-950 text-slate-200 min-h-screen font-sans">
-
-    <div class="max-w-6xl mx-auto p-6">
-        <div class="flex flex-col items-center mb-8">
-            <h1 class="text-3xl font-black mb-2 bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent uppercase tracking-tight">Boyer-Moore Search Engine</h1>
-            <div class="flex gap-4 items-center bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-xl">
-                <input id="textInput" type="text" value="hellotestopentest" class="bg-slate-800 border-none p-2 rounded-lg w-48 text-center focus:ring-2 ring-blue-500 outline-none uppercase font-mono">
-                <span class="text-slate-600 font-bold">PATTERN:</span>
-                <input id="patternInput" type="text" value="test" class="bg-slate-800 border-none p-2 rounded-lg w-32 text-center focus:ring-2 ring-blue-500 outline-none uppercase font-mono">
-                <button onclick="initialize()" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-xl font-bold transition-all active:scale-95">Reset</button>
-            </div>
-        </div>
-
-        <div class="bg-slate-900 rounded-3xl p-10 border border-slate-800 shadow-2xl relative overflow-x-auto">
-            <div id="viz-engine" class="relative mx-auto" style="height: 140px;">
-                <div id="textRow" class="flex gap-[4px] absolute top-0 left-0"></div>
-                <div id="patternWrapper" class="absolute top-[60px] left-0">
-                    <div id="patternRow" class="flex gap-[4px]"></div>
-                </div>
-            </div>
-
-            <div class="flex flex-wrap justify-between items-center mt-10 gap-4 border-t border-slate-800 pt-6">
-                <div id="status" class="text-blue-400 font-mono text-sm px-4 py-2 bg-blue-950/30 rounded-full border border-blue-900/50 italic">Ready to begin...</div>
-                <div class="flex gap-3">
-                    <button id="stepBtn" onclick="nextStep()" class="bg-emerald-600 hover:bg-emerald-500 px-8 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/20">
-                        Next Step
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-            <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-lg">
-                <h3 class="text-slate-500 text-xs font-bold uppercase mb-4 tracking-widest">Shift Jump Table</h3>
-                <div id="tableContent" class="flex flex-wrap gap-2"></div>
-            </div>
-            <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 h-48 overflow-y-auto font-mono text-xs shadow-lg" id="logs">
-                <div class="text-slate-600">// Process logs will appear here...</div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let text, pattern, table, i, reverseIdx;
-        const CELL_WIDTH = 50 + 4; // Width + Gap
-
-        function initialize() {
-            text = document.getElementById('textInput').value.toUpperCase();
-            pattern = document.getElementById('patternInput').value.toUpperCase();
-            i = 0;
-            reverseIdx = pattern.length - 1;
-            
-            // Build Bad Match Table
-            table = {};
-            for(let j = 0; j < pattern.length; j++) {
-                table[pattern[j]] = Math.max(1, pattern.length - j - 1);
-            }
-            table['*'] = pattern.length;
-
-            render();
-            updatePatternPos();
-            addLog("Algorithm initialized. Starting from the right of the pattern.", "blue");
-        }
-
-        function render() {
-            const tRow = document.getElementById('textRow');
-            tRow.innerHTML = text.split('').map((c, idx) => `<div id="t-${idx}" class="char-cell text-box">${c}</div>`).join('');
-
-            const pRow = document.getElementById('patternRow');
-            pRow.innerHTML = pattern.split('').map((c, idx) => `<div id="p-${idx}" class="char-cell pattern-box">${c}</div>`).join('');
-
-            const tContent = document.getElementById('tableContent');
-            tContent.innerHTML = Object.entries(table).map(([k, v]) => `
-                <div class="bg-slate-950 border border-slate-800 px-3 py-1 rounded-lg">
-                    <span class="text-blue-400 font-bold">${k === '*' ? 'ANY' : k}</span> : <span class="text-slate-300">${v}</span>
-                </div>
-            `).join('');
-            
-            document.getElementById('viz-engine').style.width = (text.length * CELL_WIDTH) + "px";
-        }
-
-        function updatePatternPos() {
-            // This clears any temporary styling on cells before moving
-            clearTemporaryStyles();
-            
-            gsap.to("#patternWrapper", { 
-                x: i * CELL_WIDTH, 
-                duration: 0.5, 
-                ease: "power2.inOut" 
-            });
-        }
-
-        function clearTemporaryStyles() {
-            // Robust fix: Remove mismatch/comparing classes from ALL text cells 
-            // except those that are part of a confirmed permanent match.
-            document.querySelectorAll('.text-box').forEach(el => {
-                el.classList.remove('comparing', 'match', 'mismatch');
-            });
-            document.querySelectorAll('.pattern-box').forEach(el => {
-                el.classList.remove('comparing', 'match', 'mismatch');
-            });
-        }
-
-        async function nextStep() {
-            if (i > text.length - pattern.length) {
-                document.getElementById('status').innerText = "Search Complete!";
-                return;
-            }
-
-            // 1. Highlight what we are comparing
-            clearTemporaryStyles();
-            let tIdx = i + reverseIdx;
-            let pIdx = reverseIdx;
-
-            const tEl = document.getElementById(`t-${tIdx}`);
-            const pEl = document.getElementById(`p-${pIdx}`);
-
-            tEl.classList.add('comparing');
-            pEl.classList.add('comparing');
-
-            await new Promise(r => setTimeout(r, 400));
-
-            // 2. Check Match
-            if (text[tIdx] === pattern[pIdx]) {
-                tEl.classList.replace('comparing', 'match');
-                pEl.classList.replace('comparing', 'match');
-                
-                if (reverseIdx === 0) {
-                    addLog(`Success! Pattern found at index ${i}`, 'emerald');
-                    for(let k=0; k<pattern.length; k++) {
-                        document.getElementById(`t-${i+k}`).classList.add('found-permanent');
-                    }
-                    i += 1;
-                    reverseIdx = pattern.length - 1;
-                    setTimeout(updatePatternPos, 400);
-                } else {
-                    reverseIdx--;
-                    document.getElementById('status').innerText = `Char matched! Checking index ${reverseIdx}...`;
-                }
-            } else {
-                // 3. Handle Mismatch
-                tEl.classList.replace('comparing', 'mismatch');
-                pEl.classList.replace('comparing', 'mismatch');
-                
-                let lastCharInWindow = text[i + pattern.length - 1];
-                let shift = table[lastCharInWindow] || table['*'];
-                
-                document.getElementById('status').innerText = `Mismatch! End-char '${lastCharInWindow}' says jump ${shift}`;
-                addLog(`Shifted ${shift} units`, 'red');
-
-                // Delay the jump so the user sees the red highlight
-                setTimeout(() => {
-                    i += shift;
-                    reverseIdx = pattern.length - 1;
-                    updatePatternPos();
-                }, 600);
-            }
-        }
-
-        function addLog(msg, color) {
-            const logs = document.getElementById('logs');
-            logs.innerHTML = `<div class="text-${color}-400 mb-1 font-bold">> ${msg}</div>` + logs.innerHTML;
-        }
-
-        initialize();
-    </script>
-</body>
-</html> -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Robust Boyer-Moore Visualizer</title>
+    <title>Boyer-Moore Visualizer (Mobile Ready)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
     <style>
-        :root { --cell-size: 50px; --cell-gap: 4px; }
+        :root { 
+            /* Slightly smaller cells for mobile screens */
+            --cell-size: 44px; 
+            --cell-gap: 4px; 
+        }
+        @media (min-width: 768px) {
+            :root { --cell-size: 52px; }
+        }
+
         .char-cell { 
-            width: var(--cell-size); height: var(--cell-size); 
+            min-width: var(--cell-size); 
+            height: var(--cell-size); 
             display: flex; align-items: center; justify-content: center; 
             border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-weight: 800;
             position: relative; transition: background-color 0.2s, border-color 0.2s, transform 0.2s;
+            font-size: 0.9rem;
         }
+        @media (min-width: 768px) {
+            .char-cell { font-size: 1.1rem; }
+        }
+
         .text-box { background: #1e293b; border: 2px solid #334155; color: #f8fafc; }
         .pattern-box { background: #3b82f6; border: 2px solid #2563eb; color: white; }
         
@@ -217,58 +36,74 @@
         .mismatch { background-color: #ef4444 !important; border-color: #b91c1c !important; color: white; }
         .found-permanent { background-color: #10b981; border-color: #059669; color: white; box-shadow: 0 0 15px rgba(16,185,129,0.4); }
         
+        /* Custom scrollbar for the visualization area */
+        .viz-scroll-container::-webkit-scrollbar { height: 6px; }
+        .viz-scroll-container::-webkit-scrollbar-track { background: #0f172a; }
+        .viz-scroll-container::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+
         input[type="range"] { accent-color: #6366f1; }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-200 min-h-screen font-sans">
+<body class="bg-slate-950 text-slate-200 min-h-screen font-sans pb-10">
 
-    <div class="max-w-6xl mx-auto p-6">
-        <div class="flex flex-col items-center mb-8">
-            <h1 class="text-3xl font-black mb-2 bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent uppercase tracking-tight">Boyer-Moore Search Engine</h1>
-            <div class="flex flex-wrap gap-4 items-center justify-center bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-xl">
-                <input id="textInput" type="text" value="HELLOTESTOPENTEST" class="bg-slate-800 border-none p-2 rounded-lg w-48 text-center focus:ring-2 ring-blue-500 outline-none uppercase font-mono">
-                <span class="text-slate-600 font-bold">PATTERN:</span>
-                <input id="patternInput" type="text" value="TEST" class="bg-slate-800 border-none p-2 rounded-lg w-32 text-center focus:ring-2 ring-blue-500 outline-none uppercase font-mono">
-                <button onclick="initialize()" class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-xl font-bold transition-all active:scale-95">Reset</button>
-                
-                <div class="h-8 w-[2px] bg-slate-800 mx-2"></div>
-                
-                <button id="autoBtn" onclick="toggleAuto()" class="bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl font-bold transition-all active:scale-95 flex items-center gap-2">
-                    <span id="autoBtnText">Auto Play</span>
-                </button>
-                
-                <div class="flex flex-col">
-                    <span class="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Speed</span>
-                    <input id="speedSlider" type="range" min="200" max="1800" value="1000" class="w-24">
+    <div class="max-w-6xl mx-auto p-4 md:p-6">
+        <div class="flex flex-col items-center mb-6">
+            <h1 class="text-2xl md:text-3xl font-black mb-4 bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent uppercase tracking-tight text-center">
+                Boyer-Moore Search
+            </h1>
+            
+            <div class="w-full grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-row gap-3 items-end justify-center bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-xl">
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] text-slate-500 font-bold uppercase ml-1">Text Source</label>
+                    <input id="textInput" type="text" value="HELLOTESTOPENTEST" class="bg-slate-800 border-none p-2 rounded-lg w-full lg:w-48 text-center focus:ring-2 ring-blue-500 outline-none uppercase font-mono text-sm">
                 </div>
-            </div>
-        </div>
-
-        <div class="bg-slate-900 rounded-3xl p-10 border border-slate-800 shadow-2xl relative overflow-x-auto">
-            <div id="viz-engine" class="relative mx-auto" style="height: 140px;">
-                <div id="textRow" class="flex gap-[4px] absolute top-0 left-0"></div>
-                <div id="patternWrapper" class="absolute top-[60px] left-0">
-                    <div id="patternRow" class="flex gap-[4px]"></div>
+                
+                <div class="flex flex-col gap-1">
+                    <label class="text-[10px] text-slate-500 font-bold uppercase ml-1">Pattern</label>
+                    <input id="patternInput" type="text" value="TEST" class="bg-slate-800 border-none p-2 rounded-lg w-full lg:w-32 text-center focus:ring-2 ring-blue-500 outline-none uppercase font-mono text-sm">
                 </div>
-            </div>
 
-            <div class="flex flex-wrap justify-between items-center mt-10 gap-4 border-t border-slate-800 pt-6">
-                <div id="status" class="text-blue-400 font-mono text-sm px-4 py-2 bg-blue-950/30 rounded-full border border-blue-900/50 italic">Ready to begin...</div>
-                <div class="flex gap-3">
-                    <button id="stepBtn" onclick="nextStep()" class="bg-emerald-600 hover:bg-emerald-500 px-8 py-3 rounded-xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-900/20">
-                        Manual Step
+                <div class="flex gap-2 w-full lg:w-auto">
+                    <button onclick="initialize()" class="flex-1 lg:flex-none bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-xl font-bold transition-all text-sm">Reset</button>
+                    <button id="autoBtn" onclick="toggleAuto()" class="flex-[2] lg:flex-none bg-indigo-600 hover:bg-indigo-500 px-6 py-2 rounded-xl font-bold transition-all flex items-center justify-center gap-2 text-sm">
+                        <span id="autoBtnText">Auto Play</span>
                     </button>
                 </div>
+                
+                <div class="flex flex-col w-full sm:w-auto">
+                    <span class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-2 lg:mb-1">Speed Control</span>
+                    <input id="speedSlider" type="range" min="200" max="1800" value="1000" class="w-full sm:w-32">
+                </div>
             </div>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-            <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-lg">
-                <h3 class="text-slate-500 text-xs font-bold uppercase mb-4 tracking-widest">Bad Character Table (Shifts)</h3>
+        <div class="bg-slate-900 rounded-2xl md:rounded-3xl p-4 md:p-10 border border-slate-800 shadow-2xl relative">
+            <div class="viz-scroll-container overflow-x-auto pb-4">
+                <div id="viz-engine" class="relative" style="height: 120px; min-width: 100%;">
+                    <div id="textRow" class="flex gap-[4px] absolute top-0 left-0"></div>
+                    <div id="patternWrapper" class="absolute top-[55px] left-0">
+                        <div id="patternRow" class="flex gap-[4px]"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row justify-between items-center mt-6 gap-4 border-t border-slate-800 pt-6">
+                <div id="status" class="w-full sm:w-auto text-center sm:text-left text-blue-400 font-mono text-xs md:text-sm px-4 py-2 bg-blue-950/30 rounded-full border border-blue-900/50 italic">
+                    Ready to begin...
+                </div>
+                <button id="stepBtn" onclick="nextStep()" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 px-8 py-3 rounded-xl font-bold transition-all shadow-lg shadow-emerald-900/20 text-sm">
+                    Next Step
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
+            <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 shadow-lg">
+                <h3 class="text-slate-500 text-[10px] font-bold uppercase mb-4 tracking-widest">Bad Character Table</h3>
                 <div id="tableContent" class="flex flex-wrap gap-2"></div>
             </div>
-            <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 h-48 overflow-y-auto font-mono text-xs shadow-lg" id="logs">
-                <div class="text-slate-600">// Process logs will appear here...</div>
+            <div class="bg-slate-900 p-5 rounded-2xl border border-slate-800 h-40 md:h-48 overflow-y-auto font-mono text-[10px] md:text-xs shadow-lg" id="logs">
+                <div class="text-slate-600">// Process logs...</div>
             </div>
         </div>
     </div>
@@ -277,7 +112,14 @@
         let text, pattern, table, i, reverseIdx;
         let isAutoRunning = false;
         let autoTimeout = null;
-        const CELL_WIDTH = 50 + 4; 
+
+        // Function to get current cell width based on CSS variable
+        function getCellWidth() {
+            const style = getComputedStyle(document.documentElement);
+            const size = parseInt(style.getPropertyValue('--cell-size'));
+            const gap = parseInt(style.getPropertyValue('--cell-gap'));
+            return size + gap;
+        }
 
         function initialize() {
             stopAuto();
@@ -286,7 +128,6 @@
             i = 0;
             reverseIdx = pattern.length - 1;
             
-            // Boyer-Moore-Horspool Bad Character Table
             table = {};
             for(let j = 0; j < pattern.length - 1; j++) {
                 table[pattern[j]] = pattern.length - 1 - j;
@@ -294,12 +135,13 @@
             table['*'] = pattern.length;
 
             render();
-            updatePatternPos();
-            document.getElementById('logs').innerHTML = '<div class="text-slate-600">// Process logs will appear here...</div>';
-            addLog("Algorithm initialized. Matching right-to-left.", "blue");
+            updatePatternPos(false); // No animation on init
+            document.getElementById('logs').innerHTML = '';
+            addLog("Algorithm initialized.", "blue");
         }
 
         function render() {
+            const cellWidth = getCellWidth();
             const tRow = document.getElementById('textRow');
             tRow.innerHTML = text.split('').map((c, idx) => `<div id="t-${idx}" class="char-cell text-box">${c}</div>`).join('');
 
@@ -308,20 +150,21 @@
 
             const tContent = document.getElementById('tableContent');
             tContent.innerHTML = Object.entries(table).map(([k, v]) => `
-                <div class="bg-slate-950 border border-slate-800 px-3 py-1 rounded-lg">
-                    <span class="text-blue-400 font-bold">${k === '*' ? 'OTHER' : k}</span> : <span class="text-slate-300">${v}</span>
+                <div class="bg-slate-950 border border-slate-800 px-2 py-1 rounded-lg text-xs">
+                    <span class="text-blue-400 font-bold">${k === '*' ? 'OTHER' : k}</span>:<span class="text-slate-300 ml-1">${v}</span>
                 </div>
             `).join('');
             
-            document.getElementById('viz-engine').style.width = (text.length * CELL_WIDTH) + "px";
+            document.getElementById('viz-engine').style.width = (text.length * cellWidth) + "px";
         }
 
-        function updatePatternPos() {
+        function updatePatternPos(animate = true) {
+            const cellWidth = getCellWidth();
             clearTemporaryStyles();
             gsap.to("#patternWrapper", { 
-                x: i * CELL_WIDTH, 
-                duration: 0.4, 
-                ease: "back.out(1.2)" 
+                x: i * cellWidth, 
+                duration: animate ? 0.4 : 0, 
+                ease: "power2.out" 
             });
         }
 
@@ -350,7 +193,7 @@
             tEl.classList.add('comparing');
             pEl.classList.add('comparing');
 
-            // Wait for visual comparison
+            // Visual delay
             await new Promise(r => setTimeout(r, 300));
 
             if (text[tIdx] === pattern[pIdx]) {
@@ -358,30 +201,27 @@
                 pEl.classList.replace('comparing', 'match');
                 
                 if (reverseIdx === 0) {
-                    addLog(`FULL MATCH at index ${i}`, 'emerald');
+                    addLog(`MATCH at index ${i}`, 'emerald');
                     for(let k=0; k<pattern.length; k++) {
                         document.getElementById(`t-${i+k}`).classList.add('found-permanent');
                     }
-                    
-                    // After match, shift by 1 to continue searching
                     await new Promise(r => setTimeout(r, 500));
                     i += 1;
                     reverseIdx = pattern.length - 1;
                     updatePatternPos();
                 } else {
                     reverseIdx--;
-                    document.getElementById('status').innerText = `Matched '${text[tIdx]}'. Checking next left...`;
+                    document.getElementById('status').innerText = `Match '${text[tIdx]}'. Moving left...`;
                 }
             } else {
                 tEl.classList.replace('comparing', 'mismatch');
                 pEl.classList.replace('comparing', 'mismatch');
                 
-                // Boyer-Moore-Horspool uses the character in the text aligned with the pattern's end
                 let endCharInText = text[i + pattern.length - 1];
                 let shift = table[endCharInText] || table['*'];
                 
-                document.getElementById('status').innerText = `Mismatch! '${endCharInText}' at end suggests jump of ${shift}`;
-                addLog(`Mismatch at ${tIdx}. Shifted ${shift}`, 'red');
+                document.getElementById('status').innerText = `Mismatch! Shift: ${shift}`;
+                addLog(`Shifted ${shift} via '${endCharInText}'`, 'red');
 
                 await new Promise(r => setTimeout(r, 600));
                 i += shift;
@@ -390,14 +230,7 @@
             }
         }
 
-        // Auto Run Logic
-        function toggleAuto() {
-            if (isAutoRunning) {
-                stopAuto();
-            } else {
-                startAuto();
-            }
-        }
+        function toggleAuto() { isAutoRunning ? stopAuto() : startAuto(); }
 
         function startAuto() {
             if (i > text.length - pattern.length) return;
@@ -412,29 +245,28 @@
             clearTimeout(autoTimeout);
             document.getElementById('autoBtnText').innerText = "Auto Play";
             const btn = document.getElementById('autoBtn');
-            if (btn.classList.contains('bg-amber-600')) {
-                btn.classList.replace('bg-amber-600', 'bg-indigo-600');
-            }
+            btn.classList.contains('bg-amber-600') && btn.classList.replace('bg-amber-600', 'bg-indigo-600');
         }
 
         async function runLoop() {
             if (!isAutoRunning) return;
-            
             await nextStep();
-            
             if (i <= text.length - pattern.length) {
                 let speed = 2000 - document.getElementById('speedSlider').value;
                 autoTimeout = setTimeout(runLoop, speed);
-            } else {
-                stopAuto();
-            }
+            } else { stopAuto(); }
         }
 
         function addLog(msg, color) {
             const logs = document.getElementById('logs');
-            const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            logs.innerHTML = `<div class="text-${color}-400 mb-1 font-bold"><span class="text-slate-700 mr-2">[${time}]</span>> ${msg}</div>` + logs.innerHTML;
+            logs.innerHTML = `<div class="text-${color}-400 mb-1 font-bold">> ${msg}</div>` + logs.innerHTML;
         }
+
+        // Recalculate on window resize for responsiveness
+        window.addEventListener('resize', () => {
+            render();
+            updatePatternPos(false);
+        });
 
         initialize();
     </script>
